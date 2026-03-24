@@ -1,24 +1,13 @@
-const sidebarLeft = document.getElementById('sidebar');
-const sidebarRight = document.getElementById('inspector-sidebar');
-const toggleLeftBtn = document.getElementById('toggle-sidebar');
-const toggleRightBtn = document.getElementById('toggle-inspector');
 const chatBox = document.getElementById('chat-box');
 const userInput = document.getElementById('user-input');
-const inputWrapper = document.getElementById('input-wrapper');
 const sendBtn = document.getElementById('send-btn');
 const inspectorContent = document.getElementById('inspector-content');
 
-// --- Eventos de UI ---
-toggleLeftBtn.addEventListener('click', () => sidebarLeft.classList.toggle('collapsed'));
-toggleRightBtn.addEventListener('click', () => sidebarRight.classList.toggle('collapsed'));
-userInput.addEventListener('focus', () => inputWrapper.classList.add('input-container-focus'));
-userInput.addEventListener('blur', () => inputWrapper.classList.remove('input-container-focus'));
-
-// --- Función para añadir mensajes al chat ---
+// --- Función para añadir mensajes ---
 function addMessage(role, content, id = null) {
     const isBot = role === 'bot';
     const wrapper = document.createElement('div');
-    wrapper.className = `flex gap-4 animate-fade-in ${!isBot ? 'flex-row-reverse' : ''}`;
+    wrapper.className = `flex gap-4 animate-fade-in mb-4 ${!isBot ? 'flex-row-reverse' : ''}`;
     if (id) wrapper.setAttribute('id', id);
     
     wrapper.innerHTML = `
@@ -33,83 +22,59 @@ function addMessage(role, content, id = null) {
     chatBox.scrollTop = chatBox.scrollHeight;
 }
 
-// --- Función para actualizar el panel de Inspector ---
+// --- Función para actualizar el Inspector ---
 function updateInspector(titulo, institucion, resumen) {
     inspectorContent.innerHTML = `
-        <div class="space-y-6 animate-fade-in">
+        <div class="space-y-4 animate-fade-in">
             <div class="bg-slate-900/50 border border-slate-800 p-4 rounded-xl">
-                <p class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Título de Licitación</p>
+                <p class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Título</p>
                 <p class="text-sm font-semibold text-slate-200">${titulo}</p>
             </div>
             <div class="bg-slate-900/50 border border-slate-800 p-4 rounded-xl">
                 <p class="text-[10px] uppercase tracking-widest text-slate-500 mb-1">Institución</p>
                 <p class="text-sm text-green-400">${institucion}</p>
             </div>
-            <div class="bg-green-900/10 border border-green-900/30 p-4 rounded-xl">
-                <p class="text-[10px] uppercase tracking-widest text-green-500 mb-1">Resumen de Análisis</p>
-                <p class="text-xs leading-relaxed text-slate-300 italic">"${resumen}"</p>
-            </div>
         </div>
     `;
 }
 
-// --- Lógica Principal de Envío y Consulta ---
+// --- Lógica de Envío Sincronizada ---
 async function handleAction() {
-    const query = userInput.value.trim();
-    if (!query) return;
+    const queryValue = userInput.value.trim();
+    if (!queryValue) return;
 
-    // 1. Mostrar mensaje del usuario
-    addMessage('user', query);
+    addMessage('user', queryValue);
     userInput.value = '';
 
-    // 2. Crear burbuja de carga del bot
     const botMsgId = 'bot-' + Date.now();
-    addMessage('bot', '<i class="fas fa-spinner fa-spin mr-2"></i> Analizando pliegos...', botMsgId);
+    addMessage('bot', '<i class="fas fa-spinner fa-spin mr-2"></i> Consultando pliegos...', botMsgId);
 
     try {
-        // 3. Petición al backend en GCP
         const response = await fetch('https://nonmultiplicational-van-nondualistic.ngrok-free.dev/ask', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user_question: query })
+            body: JSON.stringify({ query: queryValue }) // <--- LLAVE SINCRONIZADA
         });
 
-        if (!response.ok) throw new Error("Error en la respuesta del servidor");
+        if (!response.ok) throw new Error("Error en el servidor");
 
         const data = await response.json();
-        
-        // 4. Buscar la burbuja del bot para reemplazar el texto
         const botWrapper = document.getElementById(botMsgId);
         const botDiv = botWrapper.querySelector('.message-content');
 
         if (data.response) {
             botDiv.innerHTML = data.response;
-            updateInspector(
-                data.metadata.titulo || "Licitación detectada", 
-                data.metadata.institucion || "Institución analizada", 
-                "Análisis de licitación completado con éxito."
-            );
+            updateInspector(data.metadata.titulo, data.metadata.institucion);
         }
     } catch (error) {
         console.error("Error:", error);
         const botWrapper = document.getElementById(botMsgId);
         if (botWrapper) {
-            const botDiv = botWrapper.querySelector('.message-content');
-            botDiv.innerHTML = '<span class="text-red-400"><i class="fas fa-exclamation-triangle mr-2"></i> Error de conexión con SEI-GENA. Revisa si el contenido no seguro está permitido en el navegador.</span>';
+            botWrapper.querySelector('.message-content').innerHTML = 
+                '<span class="text-red-400">Error de conexión. Verifica el túnel de Ngrok.</span>';
         }
     }
 }
 
-// --- Listeners de Envío ---
 sendBtn.addEventListener('click', handleAction);
 userInput.addEventListener('keypress', (e) => { if (e.key === 'Enter') handleAction(); });
-
-// --- Reloj de Colombia ---
-const timeDisplay = document.getElementById('colombia-time');
-if (timeDisplay) {
-    setInterval(() => {
-        timeDisplay.textContent = new Intl.DateTimeFormat('es-CO', {
-            timeZone: 'America/Bogota', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true
-        }).format(new Date());
-    }, 1000);
-}
