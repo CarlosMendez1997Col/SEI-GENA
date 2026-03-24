@@ -6,43 +6,45 @@ function addMessage(role, content) {
     const isBot = role === 'bot';
     const div = document.createElement('div');
     div.className = `message ${isBot ? 'bot-msg' : 'user-msg'}`; 
-    // Nota: Asegúrate de tener clases básicas en tu CSS para verlos, 
-    // o usa el innerHTML que tenías antes si prefieres el diseño.
     div.innerHTML = `<strong>${isBot ? 'IA' : 'Tú'}:</strong> ${content}`;
     chatBox.appendChild(div);
     chatBox.scrollTop = chatBox.scrollHeight;
+    return div; // DEVOLVEMOS EL DIV para poder editarlo luego
 }
 
 async function enviarPregunta() {
     const texto = userInput.value.trim();
     if (!texto) return;
 
+    // Añadimos mensaje del usuario
     addMessage('user', texto);
     userInput.value = '';
-    addMessage('bot', 'Procesando respuesta...');
+
+    // Añadimos el mensaje de carga y guardamos su referencia
+    const botMsgDiv = addMessage('bot', '<i>Procesando respuesta con Phi-3...</i>');
 
     try {
         const response = await fetch('https://nonmultiplicational-van-nondualistic.ngrok-free.dev/ask', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pregunta: texto }) // VARIABLE ÚNICA: pregunta
+            body: JSON.stringify({ pregunta: texto })
         });
+
+        if (!response.ok) throw new Error("Error en el servidor");
 
         const data = await response.json();
         
-        // REEMPLAZAR EL "Procesando..." con la respuesta real
-        const messages = document.querySelectorAll('.message');
-        const lastMsg = messages[messages.length - 1];
-        
+        // REEMPLAZAMOS EL CONTENIDO del div que guardamos antes
         if (data.respuesta) {
-            lastMsg.innerHTML = `<strong>IA:</strong> ${data.respuesta}<br><small>Ref: ${data.titulo}</small>`;
+            botMsgDiv.innerHTML = `<strong>IA:</strong> ${data.respuesta}<br><br><small style="color: gray;">📌 Fuente: ${data.titulo} (${data.institucion})</small>`;
         } else {
-            lastMsg.innerHTML = "Error: El servidor no envió texto.";
+            botMsgDiv.innerHTML = "<strong>IA:</strong> Error: El servidor no envió una respuesta válida.";
         }
 
     } catch (error) {
         console.error("Error:", error);
-        addMessage('bot', "Error de conexión con el servidor.");
+        botMsgDiv.innerHTML = "<strong>IA:</strong> ❌ Error de conexión. Revisa que el túnel Ngrok esté online.";
+        botMsgDiv.classList.add('error-msg'); // Opcional: clase CSS para ponerlo en rojo
     }
 }
 
