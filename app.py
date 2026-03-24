@@ -5,12 +5,7 @@ from sqlalchemy import create_engine
 from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
-if 'db_connected' not in st.session_state:
-    st.session_state.db_connected = False
-if 'df' not in st.session_state:
-    st.session_state.df = None
-if 'embeddings' not in st.session_state:
-    st.session_state.embeddings = None
+st.set_page_config(page_title="SEI-GENA IA", layout="wide")
 
 @st.cache_resource
 def get_embedding_model():
@@ -18,71 +13,60 @@ def get_embedding_model():
 
 def conectar_base_datos(password):
     try:
-        USER, HOST, PORT, DB_NAME = "postgres", "localhost", "5432", "GENA_database"
+        USER, HOST, PORT, DB_NAME = "postgres", "34.39.132.137", "5432", "GENA_database"
         engine = create_engine(f'postgresql://{USER}:{password}@{HOST}:{PORT}/{DB_NAME}')
-        
-        query = 'SELECT * FROM "GENA_Schema"."licitaciones"'
+        query = 'SELECT * FROM "GENA_Schema"."licitaciones" LIMIT 5'
         df_local = pd.read_sql(query, engine)
-        
         model = get_embedding_model()
         textos = ("passage: " + df_local["institucion"].fillna("") + " - " + 
                   df_local["titulo"].fillna("") + " - " + 
                   df_local["informacion"].fillna("")).tolist()
-        
         embeddings_local = model.encode(textos, show_progress_bar=False)
-        
-        return df_local, embeddings_local, True
+        return df_local, embeddings_local
     except Exception as e:
-        st.error(f"Error de conexión: {e}")
-        return None, None, False
+        st.error(f"DB Connection Error: {e}")
+        return None, None
 
-st.set_page_config(page_title="SEI-GENA Core", layout="wide")
-st.title("SEarch for International calls for proposals using GENerative Artificial intelligence")
+st.title("Welcome to SEI-GENA")
+st.subheader("Search for International calls for proposals using GENerative AI")
 
 with st.sidebar:
-    st.header(" Acceso a Datos")
-    pwd = st.text_input("Contraseña de PostgreSQL", type="password")
-    if st.button("Establecer Conexión Total"):
-        with st.spinner("Conectando DB + Cargando IA..."):
-            df, embs, status = conectar_base_datos(pwd)
-            if status:
+    st.header("Control Panel")
+    pw = st.text_input("Database Password", type="password")
+    if st.button("Connect"):
+        with st.spinner("Synchronizing data..."):
+            df, embs = conectar_base_datos(pw)
+            if df is not None:
                 st.session_state.df = df
                 st.session_state.embeddings = embs
-                st.session_state.db_connected = True
-                st.success("Conexión Exitosa")
+                st.success("✅ Connected! Data is ready.")
 
-if st.session_state.db_connected:
-    st.write(f"**Base de Datos conectada:** {len(st.session_state.df)} registros listos.")
-    
-    query_usuario = st.chat_input("Realiza una consulta técnica (Ej: Proyectos de infraestructura verde)")
+query_usuario = st.chat_input("Enter your search here...")
 
-    if query_usuario:
+if query_usuario and 'df' in st.session_state:
+    with st.spinner("AI is analyzing tenders..."):
         model = get_embedding_model()
         q_vec = model.encode([f"query: {query_usuario}"])
         sims = cosine_similarity(q_vec, st.session_state.embeddings)[0]
         top_idx = sims.argsort()[-3:][::-1]
         results = st.session_state.df.iloc[top_idx]
-
-        contexto_para_ia = "\n".join([f"- {r['institucion']}: {r['titulo']}" for _, r in results.iterrows()])
-
-        with st.chat_message("assistant"):
-            try:
-                res = requests.post("http://localhost:11434/api/generate", 
-                                    json={
-                                        "model": "llama3",
-                                        "prompt": f"Usuario busca: {query_usuario}\nResultados:\n{contexto_para_ia}\nAnaliza el mejor match en español:",
-                                        "stream": False
-                                    }, timeout=30)
-                analisis = res.json().get('response')
-                st.markdown(f"### 🎯 Síntesis\n{analisis}")
-            except:
-                st.error("Ollama no responde. Verifica que el servicio esté activo.")
-
-        st.subheader("Fuentes detectadas")
-        for _, row in results.iterrows():
-            with st.expander(f"{row['institucion']} - {row['titulo']}"):
-                st.write(f"**URL:** {row['url']}")
-                st.write(f"**Detalle:** {row.get('informacion', 'Sin detalle')}")
-
-else:
-    st.warning("Esperando conexión con PostgreSQL para activar el LLM.")
+        contexto = "\n".join([f"- {r['institucion']}: {r['titulo']}" for _, r in results.iterrows()])
+        
+        try:
+            url_ollama = "http://10.158.0.2:11434/api/generate"
+            res = requests.post(url_ollama, 
+                                json={
+                                    "model": "llama3",
+                                    "prompt": f"Analyze these tenders for: {query_usuario}\nContext:\n{contexto}\nRespond briefly in English:",
+                                    "stream": False
+                                }, timeout=180) 
+            
+            if res.status_code == 200:
+                st.chat_message("assistant").markdown(res.json().get('response'))
+            else:
+                st.error(f"Error from AI Engine: Status {res.status_code}")
+                
+        except requests.exceptions.Timeout:
+            st.error("The AI is taking too long. Please try again.")
+        except Exception as e:
+            st.error(f"AI Engine Error: {e}")
