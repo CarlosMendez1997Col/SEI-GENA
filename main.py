@@ -8,54 +8,46 @@ from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
-# --- CONFIGURACIÓN DE CORS ---
+# CORS Abierto total para evitar bloqueos
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], 
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Carga del modelo de búsqueda
 model = SentenceTransformer('intfloat/multilingual-e5-small')
 
-# Clase sincronizada con el Frontend
+# VARIABLE ÚNICA: pregunta
 class QueryRequest(BaseModel):
-    query: str  # <--- Sincronizado con script.js
+    pregunta: str
 
 @app.post("/ask")
 async def ask_ai(request: QueryRequest):
     try:
         db_pass = os.getenv('POSTGRES_PASSWORD')
-        # Asegúrate de que la IP de la BD sea accesible desde esta VM
-        engine = create_engine(f'postgresql://postgres:{db_pass}@34.39.132.137:5432/GENA_database')
+        engine = create_engine(f'postgresql://postgres:{db_pass}@34.39.132.137:5432/GEN_database')
         
-        # RAG: Buscamos en la BD (Limitamos a 10 para velocidad)
-        df = pd.read_sql('SELECT titulo, institucion, informacion FROM "GENA_Schema"."licitaciones" LIMIT 10', engine)
-        
-        if df.empty:
-            raise ValueError("La base de datos no devolvió registros.")
-
+        # RAG
+        df = pd.read_sql('SELECT titulo, institucion, informacion FROM "GENA_Schema"."licitaciones" LIMIT 5', engine)
         textos = ("passage: " + df["institucion"].fillna("") + " " + df["titulo"].fillna("")).tolist()
         embs = model.encode(textos)
-        q_vec = model.encode([f"query: {request.query}"])
+        q_vec = model.encode([f"query: {request.pregunta}"])
         idx = cosine_similarity(q_vec, embs)[0].argmax()
         
-        # CONEXIÓN CON OLLAMA (Localhost)
+        # Ollama con Timeout extendido
         res = requests.post("http://127.0.0.1:11434/api/generate", json={
             "model": "phi3",
-            "prompt": f"Contexto: {df.iloc[idx]['informacion']}\nPregunta: {request.query}\nResponde en español de forma profesional:",
+            "prompt": f"Contexto: {df.iloc[idx]['informacion']}\nPregunta: {request.pregunta}\nRespuesta corta en español:",
             "stream": False
-        }, timeout=150) # Aumentado a 150 segundos
+        }, timeout=300)
         
+        # Retorno de datos simple
         return {
-            "response": res.json().get('response'),
-            "metadata": {
-                "titulo": df.iloc[idx]['titulo'], 
-                "institucion": df.iloc[idx]['institucion']
-            }
+            "respuesta": res.json().get('response'),
+            "titulo": df.iloc[idx]['titulo'],
+            "institucion": df.iloc[idx]['institucion']
         }
     except Exception as e:
-        print(f"Error en el servidor: {e}")
+        print(f"ERROR: {e}")
         raise HTTPException(status_code=500, detail=str(e))
