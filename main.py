@@ -18,7 +18,6 @@ class QueryRequest(BaseModel):
 async def ask_ai(request: QueryRequest):
     try:
         db_pass = os.getenv('POSTGRES_PASSWORD')
-        # USANDO GENA_database
         engine = create_engine(f'postgresql://postgres:{db_pass}@34.39.132.137:5432/GENA_database')
         df = pd.read_sql('SELECT titulo, institucion, informacion FROM "GENA_Schema"."licitaciones" LIMIT 5', engine)
         textos = ("passage: " + df["institucion"].fillna("") + " " + df["titulo"].fillna("")).tolist()
